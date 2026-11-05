@@ -1,0 +1,17 @@
+# Only the app and what it needs are in the repository: everything else in this
+# folder (outputs, data, work scripts) stays local.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/UVP6_finescale_segmentation_app.py
+!/start_UVP6_finescale_segmentation.bat
+!/UVP6_finescale_segmentation_tool.py
+!/uvp6_updown_segments_fromraw_firstpassage_nostop.py
+!/uvp6_updown_segments_fromraw_firstpassage.py
+!/uvp6_updown_segments.py
+!/requirements.txt
+!/environment.yml
+!/.streamlit/
+!/assets/
+__pycache__/
