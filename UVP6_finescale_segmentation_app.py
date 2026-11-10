@@ -173,7 +173,11 @@ def read_meta_header(path):
 def read_uploaded(up):
     """A metadata file from elsewhere: a UVPapp header (filename + profileid columns)
     or a CSV with a filename (or deployment) column."""
-    text = up.getvalue().decode("utf-8", errors="replace")
+    raw = up.getvalue()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:          # files saved by Excel or Windows tools
+        text = raw.decode("cp1252", errors="replace")
     first = text.splitlines()[0] if text else ""
     if "profileid" in first and "filename" in first:
         apply_metadata(*core.parse_uvpapp_header(text), label=up.name)
@@ -188,6 +192,103 @@ def read_uploaded(up):
     common = {k: df[k].iloc[0] for k in ("cruise", "ship") if k in df.columns and len(df)}
     apply_metadata({r[col]: {k: r[k] for k in FIELDS if k in df.columns} for _, r in df.iterrows()},
                    common, [], up.name)
+
+
+# ---------------------------------------------------------------- station map
+CONSTANTDEPTH_HELP = "UVPapp header field, copied as given (e.g. 5, or nan)."
+
+
+def positions(meta):
+    """Numeric positions of the deployments (DataFrame) and the problems found:
+    not a number, out of range, or far from every other station (sign or typo?)."""
+    import math
+    rows, bad = [], []
+    for _, r in meta.iterrows():
+        lat_s, lon_s = str(r["latitude"]).strip(), str(r["longitude"]).strip()
+        if lat_s.lower() in ("", "nan") and lon_s.lower() in ("", "nan"):
+            continue
+        try:
+            lat, lon = float(lat_s), float(lon_s)
+        except ValueError:
+            bad.append(f"{r['deployment']}: latitude/longitude \"{lat_s}\", \"{lon_s}\" is not a number.")
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            bad.append(f"{r['deployment']}: position {lat}, {lon} is out of range.")
+            continue
+        label = str(r["ctdref"]).strip() or r["deployment"]
+        rows.append({"deployment": r["deployment"], "label": label, "stationid": str(r["stationid"]),
+                     "lat": lat, "lon": lon})
+    pos = pd.DataFrame(rows, columns=["deployment", "label", "stationid", "lat", "lon"])
+
+    def km(a, b):
+        p1, p2 = math.radians(a.lat), math.radians(b.lat)
+        h = (math.sin((p2 - p1) / 2) ** 2
+             + math.cos(p1) * math.cos(p2) * math.sin(math.radians(b.lon - a.lon) / 2) ** 2)
+        return 12742 * math.asin(math.sqrt(h))
+    if len(pos) >= 3:
+        pts = list(pos.itertuples())
+        for a in pts:
+            nearest = min(km(a, b) for b in pts if b is not a)
+            if nearest > 1000:
+                bad.append(f"{a.deployment} ({a.label}): {nearest:,.0f} km from the nearest other station "
+                           f"({a.lat}, {a.lon}): sign or typo?")
+    return pos, bad
+
+
+def grouped_labels(pos, step=0.05):
+    """One label per place: deployments within ~`step` degrees share a label, e.g. 'CTD004, CTD005',
+    or 'CTD010 … CTD030 (14)' when there are many."""
+    groups = {}
+    for _, r in pos.iterrows():
+        key = (round(r["lat"] / step), round(r["lon"] / step))
+        g = groups.setdefault(key, {"lat": [], "lon": [], "refs": []})
+        ref = r["label"].split("_", 1)[1] if "_" in r["label"] and not r["label"][:8].isdigit() else r["label"]
+        g["lat"].append(r["lat"])
+        g["lon"].append(r["lon"])
+        g["refs"].append(ref)
+    rows = []
+    for g in groups.values():
+        refs = sorted(g["refs"])
+        label = ", ".join(refs) if len(refs) <= 3 else f"{refs[0]} … {refs[-1]} ({len(refs)})"
+        rows.append({"lat": max(g["lat"]), "lon": sum(g["lon"]) / len(g["lon"]), "label": label})
+    return pd.DataFrame(rows, columns=["lat", "lon", "label"])
+
+
+def station_map(pos):
+    """Interactive map of the stations (pydeck), labelled by ctdref."""
+    import math
+    import pydeck as pdk
+    span = max(pos["lat"].max() - pos["lat"].min(), (pos["lon"].max() - pos["lon"].min()) / 2, 0.05)
+    view = pdk.ViewState(latitude=float(pos["lat"].mean()), longitude=float(pos["lon"].mean()),
+                         zoom=max(1.0, min(12.0, math.log2(180 / span))))
+    dots = pdk.Layer("ScatterplotLayer", pos, get_position="[lon, lat]", get_radius=6,
+                     radius_units="pixels", get_fill_color=[42, 120, 214, 220],
+                     get_line_color=[255, 255, 255], line_width_min_pixels=1, stroked=True, pickable=True)
+    labels = pdk.Layer("TextLayer", grouped_labels(pos), get_position="[lon, lat]", get_text="label",
+                       get_size=12, get_color=[20, 20, 20], get_pixel_offset=[0, -14])
+    st.pydeck_chart(pdk.Deck(layers=[dots, labels], initial_view_state=view, map_style="light",
+                             tooltip={"text": "{label}\n{deployment}\nstation {stationid}\n{lat}, {lon}"}),
+                    height=420)
+
+
+def save_station_png(pos, path):
+    """Static map of the stations (for the figures folder): lon/lat with labels."""
+    import math
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(9, 7))
+    ax = fig.add_subplot(111)
+    ax.scatter(pos["lon"], pos["lat"], s=30, color="#2a78d6", edgecolor="white", zorder=3)
+    span = max(pos["lat"].max() - pos["lat"].min(), pos["lon"].max() - pos["lon"].min(), 0.1)
+    for _, r in grouped_labels(pos, step=span / 25).iterrows():
+        ax.annotate(r["label"], (r["lon"], r["lat"]), xytext=(5, 4), textcoords="offset points", fontsize=7)
+    ax.set_aspect(1 / max(0.1, math.cos(math.radians(pos["lat"].mean()))), adjustable="datalim")
+    ax.margins(0.12)
+    ax.set_xlabel("longitude (°E)")
+    ax.set_ylabel("latitude (°N)")
+    ax.grid(alpha=0.3)
+    ax.set_title(f"Stations ({len(pos)} deployments)", loc="left")
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
 
 
 # ---------------------------------------------------------------- checks
@@ -251,6 +352,9 @@ def run(project, source, out_dir, buffer_dbar, meta):
             d["meta"]["ctdref"] = str(meta.set_index("deployment").at[name, "ctdref"]) \
                 if name in set(meta["deployment"]) else ""
             core.save_png(d, out_dir / "figures" / f"{name}_segments.png")
+        pos, _ = positions(meta[meta["include"] == True])  # noqa: E712
+        if not pos.empty:
+            save_station_png(pos, out_dir / "figures" / "stations_map.png")
         s.update(label=f"2. Segments and {len(deployments)} figures saved in {out_dir}", state="complete")
 
     with st.status("3. Create the UVPapp sample header", expanded=False) as s:
@@ -375,17 +479,20 @@ else:
     meta = st.data_editor(
         meta_df, key=f"editor_{st.session_state['editor_version']}", hide_index=True,
         width="stretch", num_rows="fixed", disabled=["deployment", "note"],
+        # fixed widths so that the whole table fits on the page (no column hidden on the right)
         column_config={
-            "include": st.column_config.CheckboxColumn("include", width="small"),
-            "deployment": st.column_config.TextColumn("deployment (date-time)"),
-            "ctdref": st.column_config.TextColumn("ctdref", help="e.g. CTD001: gives <Cruise ID>_CTD001_d01…"),
-            "stationid": st.column_config.TextColumn("stationid"),
-            "latitude": st.column_config.TextColumn("latitude", help="decimal degrees, e.g. 63.849"),
-            "longitude": st.column_config.TextColumn("longitude", help="decimal degrees, e.g. -52.816"),
-            "bottomdepth": st.column_config.TextColumn("bottomdepth"),
-            "comment": st.column_config.TextColumn("comment", width="large"),
-            "constantdepth": st.column_config.TextColumn("constantdepth"),
-            "note": st.column_config.TextColumn("note"),
+            "include": st.column_config.CheckboxColumn("include", width=60),
+            "deployment": st.column_config.TextColumn("deployment", width=130,
+                                                      help="Date-time of the RAW file (yyyymmdd-HHMMSS)"),
+            "ctdref": st.column_config.TextColumn("ctdref", width=110,
+                                                  help="e.g. CTD001: gives <Cruise ID>_CTD001_d01…"),
+            "stationid": st.column_config.TextColumn("stationid", width=110),
+            "latitude": st.column_config.TextColumn("latitude", width=85, help="decimal degrees, e.g. 63.849"),
+            "longitude": st.column_config.TextColumn("longitude", width=85, help="decimal degrees, e.g. -52.816"),
+            "bottomdepth": st.column_config.TextColumn("bottomdepth", width=95, help="Bottom depth (m), or nan"),
+            "comment": st.column_config.TextColumn("comment", width=230),
+            "constantdepth": st.column_config.TextColumn("constantdepth", width=105, help=CONSTANTDEPTH_HELP),
+            "note": st.column_config.TextColumn("note", width=160),
         })
     meta = meta.fillna("")
     st.session_state["meta_edit"] = meta
@@ -398,6 +505,15 @@ else:
             "first downcast": [core.profile_name(cruise, str(r).strip(), "down", 1) for r in names["ctdref"]],
             "first upcast": [core.profile_name(cruise, str(r).strip(), "up", 1) for r in names["ctdref"]],
         }), hide_index=True, width="stretch")
+    st.subheader("Station map: check the GPS positions")
+    pos, bad = positions(meta[meta["include"] == True])  # noqa: E712
+    for b in bad:
+        st.warning(b, icon="⚠️")
+    if pos.empty:
+        st.caption("Enter latitude and longitude in the table: the stations appear here.")
+    else:
+        station_map(pos)
+        st.caption(f"{len(pos)} included deployments with a position. Hover a point to see which one it is.")
     csv_out = meta.drop(columns=["note"]).rename(columns={"deployment": "filename"})
     csv_out.insert(2, "cruise", st.session_state["cruise"])
     csv_out.insert(3, "ship", st.session_state["ship"])
@@ -460,13 +576,29 @@ if res:
     st.download_button("Download all figures and the segments table (zip)", zipped.getvalue(),
                        file_name=f"{project.name}_segments.zip", mime="application/zip", width=BUTTON_WIDTH)
 
-    t1, t2, t3 = st.tabs(["Figures", "Segments", "Messages"])
+    t1, t4, t2, t3 = st.tabs(["Figures", "Station map", "Segments", "Messages"])
     with t1:
-        pick = st.selectbox("Deployment", list(res["deployments"]))
-        png = fig_dir / f"{pick}_segments.png"
-        if png.exists():
-            st.image(str(png), caption=f"{pick}: blue = downcast kept, red = upcast kept, grey = all images")
-            st.download_button(f"Download {png.name}", png.read_bytes(), file_name=png.name, mime="image/png")
+        st.caption("Blue = downcast kept, red = upcast kept, grey = all images.")
+        names = list(res["deployments"])
+        refs = st.session_state.get("meta_edit", st.session_state["meta_df"]).set_index("deployment")["ctdref"]
+        cols = st.columns(2)
+        for i, name in enumerate(names):
+            png = fig_dir / f"{name}_segments.png"
+            if not png.exists():
+                continue
+            with cols[i % 2]:
+                ref = str(refs.get(name, "")).strip()
+                st.image(str(png), caption=f"{name}" + (f" · {ref}" if ref else ""))
+                st.download_button(f"Download {png.name}", png.read_bytes(), file_name=png.name,
+                                   mime="image/png", key=f"dl_{name}")
+    with t4:
+        map_png = fig_dir / "stations_map.png"
+        if map_png.exists():
+            st.image(str(map_png), caption="Positions entered in step 3 (also in the figures folder)")
+            st.download_button("Download stations_map.png", map_png.read_bytes(), file_name=map_png.name,
+                               mime="image/png", key="dl_map")
+        else:
+            st.caption("No position was entered in step 3.")
     with t2:
         st.dataframe(pd.read_csv(res["out_dir"] / "all_segments.csv", sep=";"), hide_index=True,
                      width="stretch")
