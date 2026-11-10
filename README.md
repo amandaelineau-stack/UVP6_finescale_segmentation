@@ -49,10 +49,12 @@ The page has five steps:
    `latitude`, `longitude`, `bottomdepth`, `comment`, `constantdepth`. When the project's `meta/` folder holds a
    UVPapp header, it is read first and fills the table (its metadata only, not its segmentation), still editable;
    a file from elsewhere (UVPapp header or CSV) can be loaded instead, and the table saved as a CSV. Deck tests
-   (very short RAW files) are unticked.
+   (very short RAW files) are unticked. A **station map** under the table shows the positions as they are typed, and
+   flags a position that is not a number, out of range, or more than 1,000 km from every other station.
 4. **Run**: the button is enabled once nothing is missing (the list of what is missing is shown in red). It
    segments every deployment, saves the segments and one figure per deployment, then writes the sample header.
-5. **Results**: download the sample header, the figures and the segments table; view each deployment's figure.
+5. **Results**: download the sample header, the figures and the segments table; all the deployment figures are
+   shown, with the station map (`figures/stations_map.png`).
 
 ## Outputs
 
