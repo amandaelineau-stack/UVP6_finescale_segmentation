@@ -118,6 +118,10 @@ def load_deployments():
     st.session_state["editor_version"] = st.session_state.get("editor_version", 0) + 1
     for k, v in list(hw.items()) + list(common.items()):
         st.session_state[k] = v
+    from_config = core.read_cruise_info(project)
+    st.session_state["cruise_from"] = (
+        f"Pre-filled from config/cruise_info.txt: {', '.join(f'{k} = {v}' for k, v in from_config.items())}."
+        if from_config else "")
 
 
 def empty_meta():
@@ -143,8 +147,8 @@ def prefill_from_header(path):
     metas, common, conflicts = core.read_uvpapp_header(path)
     known = set(current_meta()["deployment"])
     set_meta({n: m for n, m in metas.items() if n in known})
-    for k, v in common.items():
-        if v:
+    for k, v in common.items():       # cruise and ship: only when still empty
+        if v and not str(st.session_state.get(k, "")).strip():
             st.session_state[k] = v
     st.session_state["prefill_msg"] = (
         f"{len(known & set(metas))} of {len(known)} deployments pre-filled from {Path(path).name}.",
@@ -273,6 +277,8 @@ with st.container(border=True):
 # 2 ------------------------------------------------------------------------
 st.header("2 · Cruise metadata")
 st.write("The same for every deployment of the project.")
+if st.session_state.get("cruise_from"):
+    st.caption(st.session_state["cruise_from"] + " Change it here if needed.")
 c1, c2, c3 = st.columns([2, 2, 1])
 c1.text_input("Cruise ID", key="cruise", help="Starts every profile name, e.g. jc282_Rebels2")
 c2.text_input("Ship", key="ship", help="e.g. RRS James Cook")

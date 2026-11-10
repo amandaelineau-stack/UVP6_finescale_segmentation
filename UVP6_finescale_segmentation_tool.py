@@ -377,11 +377,29 @@ def ecodata_ini(prof_dir):
     return None
 
 
+def read_cruise_info(project_dir):
+    """Cruise metadata from the project's config/cruise_info.txt, if any:
+    {"cruise": ..., "ship": ...} (only the keys found). Reads the UVPapp
+    format (acron=jc282_rebels2) and the simple one (name: jc282_rebels2)."""
+    path = Path(project_dir) / "config" / "cruise_info.txt"
+    if not path.is_file():
+        return {}
+    out = {}
+    for line in path.read_text(encoding="latin-1", errors="replace").splitlines():
+        m = re.match(r"\s*(acron|name|ship|ship_name)\s*[=:]\s*(.*?)\s*$", line, re.I)
+        if m and m.group(2):
+            key = "ship" if m.group(1).lower().startswith("ship") else "cruise"
+            out.setdefault(key, m.group(2))
+    return out
+
+
 def list_deployments(project_dir, source):
     """Deployments of a project without segmenting: (names, pre-filled
-    metadata per name, camera settings, cruise metadata)."""
+    metadata per name, camera settings, cruise metadata). The cruise
+    metadata comes from config/cruise_info.txt first, then ecodata."""
     src = Path(project_dir) / source
-    names, metas, hw, common = [], {}, {}, {}
+    names, metas, hw = [], {}, {}
+    common = read_cruise_info(project_dir)
     if source == "raw":
         for d in sorted(x for x in src.iterdir() if x.is_dir()):
             data = d / f"{d.name}_data.txt"
@@ -639,8 +657,8 @@ class App(tk.Tk):
                 filled += 1
                 for k, v in m.items():
                     row[k].set(v)
-        for k, v in common.items():
-            if v:
+        for k, v in common.items():       # cruise and ship: only when still empty
+            if v and not self.globals[k].get().strip():
                 self.globals[k].set(v)
         missing = [n for n in self.rows if n not in metas]
         msg = f"{filled} of {len(self.rows)} deployments pre-filled from\n{path}"

@@ -42,7 +42,8 @@ The page has five steps:
 1. **Choose the UVP6 project**: the UVPapp project folder (`uvp6_sn…`, holding `raw/`, `ecodata/`, `meta/`), then
    work from **raw** (recommended) or **ecodata**; each choice shows what the project holds (e.g. "✅ 37 deployments",
    "⚠️ empty"). The title turns green once the project is found, with its number of deployments. One deployment = one rosette dive = one RAW file (`yyyymmdd-HHMMSS`).
-2. **Cruise metadata**, the same for every deployment: cruise ID, ship, sample type. The camera settings
+2. **Cruise metadata**, the same for every deployment: cruise ID, ship, sample type. The cruise ID is
+   proposed from the project's `config/cruise_info.txt` (`acron=`) when it exists; the camera settings
    (image volume, aa, exp, pixel size) are read from the data.
 3. **Deployment metadata**, one row per deployment, filled in like a spreadsheet: `ctdref`, `stationid`,
    `latitude`, `longitude`, `bottomdepth`, `comment`, `constantdepth`. It can be pre-filled from an existing UVPapp
