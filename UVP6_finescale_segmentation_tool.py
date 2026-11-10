@@ -461,7 +461,7 @@ class App(tk.Tk):
         ttk.Label(t, text="Work from:").grid(row=2, column=0, sticky="w", pady=(12, 0))
         ttk.Radiobutton(t, text="raw  (RAW files, one sub-folder per deployment)",
                         variable=self.source, value="raw").grid(row=3, column=0, columnspan=2, sticky="w")
-        ttk.Radiobutton(t, text="ecodata  (profiles exported by UVPapp, if there is no RAW)",
+        ttk.Radiobutton(t, text="ecodata  (profiles exported by UVPapp)",
                         variable=self.source, value="ecodata").grid(row=4, column=0, columnspan=2, sticky="w")
 
         ttk.Label(t, text="Segments and figures are saved in:").grid(
@@ -480,7 +480,7 @@ class App(tk.Tk):
         if not d:
             return
         self.project.set(d)
-        self.out_dir.set(str(Path(d) / "updown_segments"))
+        self.out_dir.set(str(Path(d) / "casts_segmented"))
         has = [s for s in ("raw", "ecodata")
                if (Path(d) / s).is_dir() and any((Path(d) / s).iterdir())]
         if has == ["ecodata"]:
@@ -504,7 +504,7 @@ class App(tk.Tk):
             messagebox.showerror("Project folder", f"No {self.source.get()} folder in\n{project}")
             return
         if not self.out_dir.get():
-            self.out_dir.set(str(project / "updown_segments"))
+            self.out_dir.set(str(project / "casts_segmented"))
         try:
             names, metas, hw, common = list_deployments(project, self.source.get())
         except OSError as err:

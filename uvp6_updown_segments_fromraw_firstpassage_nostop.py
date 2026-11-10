@@ -53,11 +53,11 @@ containing <cast>_data.txt (and images.zip).
 Casts whose maximum pressure is below --buffer (deck tests at 0 dbar) are
 skipped.
 
-OUTPUT (default: a "updown_segments" folder next to the raw folder)
+OUTPUT (default: a "casts_segmented" folder next to the raw folder)
     <cast>_down_segments.csv   one row per clean downcast stretch
     <cast>_up_segments.csv     one row per clean upcast stretch
     all_casts_segments.csv     every stretch from every cast in one file
-    <cast>_segments.png        quick-look plot (only with --plot)
+    figures/<cast>_segments.png  quick-look plot (only with --plot)
 
 Columns: cast, direction, segment, first_image, last_image, n_images,
 start_time, end_time, start_pressure_dbar, end_pressure_dbar.
@@ -224,7 +224,7 @@ def main():
     parser.add_argument("raw", type=Path,
                         help="UVP6 raw folder (one sub-folder per cast)")
     parser.add_argument("-o", "--output", type=Path,
-                        help="output folder (default: updown_segments "
+                        help="output folder (default: casts_segmented "
                              "next to the raw folder)")
     parser.add_argument("--plot", action="store_true",
                         help="also save a quick-look PNG for each cast "
@@ -242,8 +242,10 @@ def main():
     if not raw.is_dir():
         sys.exit(f"Not a folder: {raw}")
     out_dir = (args.output.expanduser() if args.output
-               else raw.parent / "updown_segments")
+               else raw.parent / "casts_segmented")
     out_dir.mkdir(parents=True, exist_ok=True)
+    if args.plot:
+        (out_dir / "figures").mkdir(exist_ok=True)
 
     all_segments = []
     for cast_dir in sorted(p for p in raw.iterdir() if p.is_dir()):
@@ -270,7 +272,7 @@ def main():
         write_csv(out_dir / f"{cast}_up_segments.csv", up)
         all_segments += segments
         if args.plot:
-            plot_cast(out_dir / f"{cast}_segments.png", cast, pressures,
+            plot_cast(out_dir / "figures" / f"{cast}_segments.png", cast, pressures,
                       is_down, undisturbed)
 
         n_down = sum(s["n_images"] for s in down)

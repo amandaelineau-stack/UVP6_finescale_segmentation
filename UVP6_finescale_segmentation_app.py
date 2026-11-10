@@ -64,6 +64,17 @@ def sources_in(project):
             if (project / s).is_dir() and any((project / s).iterdir())]
 
 
+def source_flag(project, source):
+    """What the raw/ or ecodata/ folder of the project holds, as a short flag."""
+    folder = project / source
+    if not folder.is_dir():
+        return "⚠️ no folder"
+    n = sum(1 for p in folder.iterdir() if p.is_dir())
+    if n == 0:
+        return "⚠️ empty"
+    return f"✅ {n} {'deployments' if source == 'raw' else 'UVPapp profiles'}"
+
+
 def project_status(project):
     if not project:
         return False, "not chosen yet"
@@ -87,7 +98,7 @@ def on_project_change():
     has = sources_in(project)
     if st.session_state.get("source") not in has:
         st.session_state["source"] = has[0]
-    st.session_state["out_dir"] = str(project / "updown_segments")
+    st.session_state["out_dir"] = str(project / "casts_segmented")
     load_deployments()
 
 
@@ -247,10 +258,10 @@ with st.container(border=True):
                            status=project_status(project_path), on_change=on_project_change)
     if project and project.is_dir() and sources_in(project):
         has = sources_in(project)
+        flags = {s: source_flag(project, s) for s in ("raw", "ecodata")}
         st.radio("Work from", ["raw", "ecodata"], key="source", horizontal=True,
                  format_func=lambda s: {"raw": "raw (RAW files, recommended)",
-                                        "ecodata": "ecodata (UVPapp profiles, if there is no RAW)"}[s]
-                 + ("" if s in has else " · not in this project"),
+                                        "ecodata": "ecodata (UVPapp profiles)"}[s] + f"  ·  {flags[s]}",
                  on_change=load_deployments)
         if st.session_state["source"] not in has:
             st.caption(f":red[There is no {st.session_state['source']} data in this project.]")

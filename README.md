@@ -40,8 +40,8 @@ app; close it to stop the app. (Tip: make a desktop shortcut to the .bat and giv
 The page has five steps:
 
 1. **Choose the UVP6 project**: the UVPapp project folder (`uvp6_sn…`, holding `raw/`, `ecodata/`, `meta/`), then
-   work from **raw** (recommended) or **ecodata** (if there is no RAW). The title turns green once the project is
-   found, with its number of deployments. One deployment = one rosette dive = one RAW file (`yyyymmdd-HHMMSS`).
+   work from **raw** (recommended) or **ecodata**; each choice shows what the project holds (e.g. "✅ 37 deployments",
+   "⚠️ empty"). The title turns green once the project is found, with its number of deployments. One deployment = one rosette dive = one RAW file (`yyyymmdd-HHMMSS`).
 2. **Cruise metadata**, the same for every deployment: cruise ID, ship, sample type. The camera settings
    (image volume, aa, exp, pixel size) are read from the data.
 3. **Deployment metadata**, one row per deployment, filled in like a spreadsheet: `ctdref`, `stationid`,
@@ -57,8 +57,8 @@ The page has five steps:
 |---|---|
 | Sample header for UVPapp, one line per segment | `<project>/meta/uvp6_header_<project name without "uvp6_">.txt` |
 | Previous sample header, if there was one | `<project>/meta/archives/<same name>.backup_<yyyymmdd_HHMMSS>` |
-| All segments (first and last image, time, pressure) | `<project>/updown_segments/all_segments.csv` (folder can be changed) |
-| One figure per deployment | `<project>/updown_segments/figures/<deployment>_segments.png` |
+| All segments (first and last image, time, pressure) | `<project>/casts_segmented/all_segments.csv` (folder can be changed) |
+| One figure per deployment | `<project>/casts_segmented/figures/<deployment>_segments.png` |
 
 - **Header name**: UVPapp only reads the header named after the project folder, so the new header takes that name
   and the old one is moved to `meta/archives/` first. The new header is written completely before the old one is
