@@ -256,21 +256,59 @@ def grouped_labels(pos, step=0.05):
     return pd.DataFrame(rows, columns=["lat", "lon", "label"])
 
 
-def station_map(pos):
-    """Interactive map of the stations (pydeck), labelled by ctdref."""
-    import math
-    import pydeck as pdk
-    span = max(pos["lat"].max() - pos["lat"].min(), (pos["lon"].max() - pos["lon"].min()) / 2, 0.05)
-    view = pdk.ViewState(latitude=float(pos["lat"].mean()), longitude=float(pos["lon"].mean()),
-                         zoom=max(1.0, min(12.0, math.log2(180 / span))))
-    dots = pdk.Layer("ScatterplotLayer", pos, get_position="[lon, lat]", get_radius=6,
-                     radius_units="pixels", get_fill_color=[42, 120, 214, 220],
-                     get_line_color=[255, 255, 255], line_width_min_pixels=1, stroked=True, pickable=True)
-    labels = pdk.Layer("TextLayer", grouped_labels(pos), get_position="[lon, lat]", get_text="label",
-                       get_size=12, get_color=[20, 20, 20], get_pixel_offset=[0, -14])
-    st.pydeck_chart(pdk.Deck(layers=[dots, labels], initial_view_state=view, map_style="light",
-                             tooltip={"text": "{label}\n{deployment}\nstation {stationid}\n{lat}, {lon}"}),
-                    height=420)
+CALIB_REPORTS_URL = "https://uvpdb.ecotaxa.org/app/login.php"
+
+# Leaflet map with a bathymetric basemap (Esri Ocean, built on GEBCO and other sources)
+MAP_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>html,body,#map{height:100%;margin:0} .leaflet-tooltip{font:12px sans-serif}</style>
+</head><body><div id="map"></div><script>
+const pts = __POINTS__;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const map = L.map('map', {zoomSnap: 0.25});
+const esri = 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/';
+L.tileLayer(esri + 'World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {maxZoom: 13,
+  attribution: 'Bathymetry: Esri, GEBCO, NOAA, Garmin, HERE and others'}).addTo(map);
+L.tileLayer(esri + 'World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', {maxZoom: 13}).addTo(map);
+const bounds = [];
+for (const p of pts) {
+  L.circleMarker([p.lat, p.lon], {radius: 4, weight: 1, color: '#ffffff', fillColor: '#d62728', fillOpacity: 0.95})
+   .bindTooltip(`<b>${esc(p.label)}</b><br>${esc(p.deployment)}<br>station ${esc(p.stationid)}<br>${p.lat}, ${p.lon}`)
+   .addTo(map);
+  bounds.push([p.lat, p.lon]);
+}
+if (bounds.length === 1) map.setView(bounds[0], 8); else map.fitBounds(bounds, {padding: [25, 25]});
+</script></body></html>"""
+
+
+def station_map(pos, height=340):
+    """Interactive map of the stations on a bathymetric background; hover a point to see which one it is."""
+    import json
+    points = json.dumps(pos[["label", "deployment", "stationid", "lat", "lon"]].to_dict("records"))
+    st.iframe(MAP_HTML.replace("__POINTS__", points), height=height)
+
+
+def camera_serial():
+    """Serial number of the UVP6 (HW_CONF of the first RAW file, or Camera_ref in ecodata)."""
+    p = st.session_state.get("project")
+    if not p or not Path(p).is_dir():
+        return ""
+    raw = Path(p) / "raw"
+    if raw.is_dir():
+        for d in sorted(x for x in raw.iterdir() if x.is_dir()):
+            data = d / f"{d.name}_data.txt"
+            if data.exists():
+                with open(data, errors="replace") as f:
+                    fields = f.readline().split(",")
+                return fields[1] if len(fields) > 1 and fields[0] == "HW_CONF" else ""
+    eco = Path(p) / "ecodata"
+    if eco.is_dir():
+        for d in sorted(x for x in eco.iterdir() if x.is_dir()):
+            text = core.ecodata_ini(d)
+            if text:
+                return core.read_ini(text).get("Camera_ref", "")
+    return ""
 
 
 def save_station_png(pos, path):
@@ -424,7 +462,11 @@ c1, c2, c3 = st.columns([2, 2, 1])
 c1.text_input("Cruise ID", key="cruise", help="Starts every profile name, e.g. jc282_Rebels2")
 c2.text_input("Ship", key="ship", help="e.g. RRS James Cook")
 c3.text_input("Sample type", key="sampletype", help="P for a profile")
-with st.expander("Camera settings (read from the data, change only if needed)"):
+with st.container(border=True):
+    sn = camera_serial()
+    st.markdown("**Camera settings** · read from the data. **Check them every time** against the "
+                f"intercalibration report of the instrument{f' (**SN {sn}**)' if sn else ''} in the "
+                f"[UVP database]({CALIB_REPORTS_URL}).")
     d1, d2, d3, d4 = st.columns(4)
     d1.text_input("Image volume (L) · volimage", key="volimage")
     d2.text_input("aa", key="aa")
@@ -509,13 +551,20 @@ else:
         }), hide_index=True, width="stretch")
     st.subheader("Station map: check the GPS positions")
     pos, bad = positions(meta[meta["include"] == True])  # noqa: E712
-    for b in bad:
-        st.warning(b, icon="⚠️")
-    if pos.empty:
-        st.caption("Enter latitude and longitude in the table: the stations appear here.")
-    else:
-        station_map(pos)
-        st.caption(f"{len(pos)} included deployments with a position. Hover a point to see which one it is.")
+    m1, m2 = st.columns([3, 2])
+    with m2:
+        if pos.empty:
+            st.caption("Enter latitude and longitude in the table: the stations appear here.")
+        else:
+            st.caption(f"{len(pos)} included deployments with a position, on a bathymetric background. "
+                       "Hover a point to see which one it is; zoom with the mouse wheel.")
+        if not bad and not pos.empty:
+            st.success("No obvious GPS error.", icon="✅")
+        for b in bad:
+            st.warning(b, icon="⚠️")
+    if not pos.empty:
+        with m1:
+            station_map(pos)
     csv_out = meta.drop(columns=["note"]).rename(columns={"deployment": "filename"})
     csv_out.insert(2, "cruise", st.session_state["cruise"])
     csv_out.insert(3, "ship", st.session_state["ship"])

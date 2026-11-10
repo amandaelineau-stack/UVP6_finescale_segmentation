@@ -43,13 +43,15 @@ The page has five steps:
    work from **raw** (recommended) or **ecodata**; each choice shows what the project holds (e.g. "✅ 37 deployments",
    "⚠️ empty"). The title turns green once the project is found, with its number of deployments. One deployment = one rosette dive = one RAW file (`yyyymmdd-HHMMSS`).
 2. **Cruise metadata**, the same for every deployment: cruise ID, ship, sample type. The cruise ID is
-   proposed from the project's `config/cruise_info.txt` (`acron=`) when it exists; the camera settings
-   (image volume, aa, exp, pixel size) are read from the data.
+   proposed from the project's `config/cruise_info.txt` (`acron=`) when it exists. The camera settings
+   (image volume, aa, exp, pixel size) are read from the data and must be checked every time against the
+   instrument's intercalibration report in the [UVP database](https://uvpdb.ecotaxa.org/app/login.php).
 3. **Deployment metadata**, one row per deployment, filled in like a spreadsheet: `ctdref`, `stationid`,
    `latitude`, `longitude`, `bottomdepth`, `comment`, `constantdepth`. When the project's `meta/` folder holds a
    UVPapp header, it is read first and fills the table (its metadata only, not its segmentation), still editable;
    a file from elsewhere (UVPapp header or CSV) can be loaded instead, and the table saved as a CSV. Deck tests
-   (very short RAW files) are unticked. A **station map** under the table shows the positions as they are typed, and
+   (very short RAW files) are unticked. A **station map** on a bathymetric background (Esri Ocean basemap) under the table shows the positions as
+   they are typed, and
    flags a position that is not a number, out of range, or more than 1,000 km from every other station.
 4. **Run**: the button is enabled once nothing is missing (the list of what is missing is shown in red). It
    segments every deployment, saves the segments and one figure per deployment, then writes the sample header.
