@@ -46,8 +46,10 @@ The page has five steps:
    proposed from the project's `config/cruise_info.txt` (`acron=`) when it exists; the camera settings
    (image volume, aa, exp, pixel size) are read from the data.
 3. **Deployment metadata**, one row per deployment, filled in like a spreadsheet: `ctdref`, `stationid`,
-   `latitude`, `longitude`, `bottomdepth`, `comment`, `constantdepth`. It can be pre-filled from an existing UVPapp
-   header of the project, or from a CSV, and saved as a CSV. Deck tests (very short RAW files) are unticked.
+   `latitude`, `longitude`, `bottomdepth`, `comment`, `constantdepth`. When the project's `meta/` folder holds a
+   UVPapp header, it is read first and fills the table (its metadata only, not its segmentation), still editable;
+   a file from elsewhere (UVPapp header or CSV) can be loaded instead, and the table saved as a CSV. Deck tests
+   (very short RAW files) are unticked.
 4. **Run**: the button is enabled once nothing is missing (the list of what is missing is shown in red). It
    segments every deployment, saves the segments and one figure per deployment, then writes the sample header.
 5. **Results**: download the sample header, the figures and the segments table; view each deployment's figure.

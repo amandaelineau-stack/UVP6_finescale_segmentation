@@ -229,7 +229,11 @@ def read_uvpapp_header(path):
     -> ({filename: per-deployment fields}, {cruise, ship}, conflicts).
     Fields that differ between profiles of one deployment take the most
     common value; each such case is listed in conflicts."""
-    text = Path(path).read_text(errors="replace")
+    return parse_uvpapp_header(Path(path).read_text(errors="replace"))
+
+
+def parse_uvpapp_header(text):
+    """read_uvpapp_header on the file's text (e.g. an uploaded file)."""
     rows = [r for r in csv.DictReader(text.splitlines(), delimiter=";")
             if r.get("filename")]
     if not rows or "profileid" not in rows[0]:

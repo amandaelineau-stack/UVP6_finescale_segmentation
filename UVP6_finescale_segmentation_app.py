@@ -114,14 +114,22 @@ def load_deployments():
             note = "very short file: deck test?" if size < SHORT_FILE else ""
         rows.append({"include": note == "", "deployment": n, **{k: m.get(k, "") for k in FIELDS},
                      "note": note})
+    st.session_state.pop("meta_edit", None)
     st.session_state["meta_df"] = pd.DataFrame(rows, columns=["include", "deployment", *FIELDS, "note"])
     st.session_state["editor_version"] = st.session_state.get("editor_version", 0) + 1
+    for k in ("cruise", "ship"):
+        st.session_state[k] = ""
     for k, v in list(hw.items()) + list(common.items()):
         st.session_state[k] = v
     from_config = core.read_cruise_info(project)
     st.session_state["cruise_from"] = (
         f"Pre-filled from config/cruise_info.txt: {', '.join(f'{k} = {v}' for k, v in from_config.items())}."
         if from_config else "")
+    # the deployment metadata is read first from the project's meta/ folder
+    st.session_state["meta_source"] = None
+    header = core.find_uvpapp_header(project)
+    if header:
+        read_meta_header(header)
 
 
 def empty_meta():
@@ -143,16 +151,43 @@ def current_meta():
     return st.session_state.get("meta_edit", st.session_state["meta_df"])
 
 
-def prefill_from_header(path):
-    metas, common, conflicts = core.read_uvpapp_header(path)
+def apply_metadata(metas, common, conflicts, label):
+    """Put per-deployment metadata into the table; cruise and ship only when still empty."""
     known = set(current_meta()["deployment"])
     set_meta({n: m for n, m in metas.items() if n in known})
-    for k, v in common.items():       # cruise and ship: only when still empty
+    for k, v in common.items():
         if v and not str(st.session_state.get(k, "")).strip():
             st.session_state[k] = v
     st.session_state["prefill_msg"] = (
-        f"{len(known & set(metas))} of {len(known)} deployments pre-filled from {Path(path).name}.",
-        conflicts, sorted(known - set(metas)))
+        f"{len(known & set(metas))} of {len(known)} deployments filled from {label}.",
+        [c for c in conflicts if c.split(" ")[0] in known], sorted(known - set(metas)))
+
+
+def read_meta_header(path):
+    """The UVPapp header in the project's meta/ folder."""
+    path = Path(path)
+    apply_metadata(*core.read_uvpapp_header(path), label=f"meta/{path.name}")
+    st.session_state["meta_source"] = path
+
+
+def read_uploaded(up):
+    """A metadata file from elsewhere: a UVPapp header (filename + profileid columns)
+    or a CSV with a filename (or deployment) column."""
+    text = up.getvalue().decode("utf-8", errors="replace")
+    first = text.splitlines()[0] if text else ""
+    if "profileid" in first and "filename" in first:
+        apply_metadata(*core.parse_uvpapp_header(text), label=up.name)
+        return
+    df = pd.read_csv(io.StringIO(text), sep=";" if first.count(";") >= first.count(",") else ",",
+                     dtype=str, keep_default_na=False)
+    col = "filename" if "filename" in df.columns else "deployment"
+    if col not in df.columns:
+        st.session_state["upload_error"] = ("The file needs a 'filename' column (deployment date-time, "
+                                            "e.g. 20250810-102258), or must be a UVPapp header.")
+        return
+    common = {k: df[k].iloc[0] for k in ("cruise", "ship") if k in df.columns and len(df)}
+    apply_metadata({r[col]: {k: r[k] for k in FIELDS if k in df.columns} for _, r in df.iterrows()},
+                   common, [], up.name)
 
 
 # ---------------------------------------------------------------- checks
@@ -295,30 +330,33 @@ st.header("3 · Deployment metadata")
 st.write("One row per deployment (date-time of the RAW file). Fill in the CTD reference, station, GPS position, "
          "comment… Profiles are named automatically **<Cruise ID>_<ctdref>_d01**, _d02… for downcasts and "
          "_u01… for upcasts. Untick **include** to leave a deployment out.")
-if project and project.is_dir():
-    found = core.find_uvpapp_header(project)
-    b1, b2, b3 = st.columns(3)
-    if found:
-        b1.button(f"Pre-fill from the existing header ({found.name})", on_click=prefill_from_header,
-                  args=(found,), width="stretch",
-                  help="Takes ctdref, station, GPS, comment… from it, not its segmentation")
-    up = b2.file_uploader("Load a metadata CSV", type=["csv", "txt"], label_visibility="collapsed",
-                          help="Columns: filename (or deployment) + any of " + ", ".join(FIELDS))
-    if up is not None and st.session_state.get("csv_loaded") != up.file_id:
-        text = up.getvalue().decode(errors="replace")
-        first = text.splitlines()[0] if text else ""
-        csv_df = pd.read_csv(io.StringIO(text), sep=";" if first.count(";") >= first.count(",") else ",",
-                             dtype=str, keep_default_na=False)
-        col = "filename" if "filename" in csv_df.columns else "deployment"
-        if col in csv_df.columns:
-            set_meta({r[col]: {k: r[k] for k in FIELDS if k in csv_df.columns} for _, r in csv_df.iterrows()})
-            for k in ("cruise", "ship"):
-                if k in csv_df.columns and len(csv_df) and csv_df[k].iloc[0]:
-                    st.session_state[k] = csv_df[k].iloc[0]
-            st.session_state["prefill_msg"] = (f"Metadata loaded from {up.name}.", [], [])
+if project and project.is_dir() and not st.session_state["meta_df"].empty:
+    with st.container(border=True):
+        src = st.session_state.get("meta_source")
+        found = core.find_uvpapp_header(project)
+        if src:
+            c1, c2 = st.columns([3, 1], vertical_alignment="center")
+            c1.markdown(f":green[✅ **Metadata read from the project:** meta/{Path(src).name}] · edit it in the "
+                        "table below (only its metadata is used, not its segmentation).")
+            c2.button(f"Read meta/{Path(src).name} again", on_click=read_meta_header, args=(src,),
+                      width="stretch", help="Puts the file's values back in the table, replacing your edits of those values")
+        elif found:
+            c1, c2 = st.columns([3, 1], vertical_alignment="center")
+            c1.markdown(f"The project has a UVPapp header in meta/: **{found.name}**.")
+            c2.button("Read it", on_click=read_meta_header, args=(found,), width="stretch")
         else:
-            st.error("The CSV needs a 'filename' column (deployment date-time, e.g. 20250810-102258).")
-        st.session_state["csv_loaded"] = up.file_id
+            st.markdown(":orange[⚠️ **No UVPapp header in the project's meta/ folder.**] "
+                        "Fill in the table below, or load a file from elsewhere.")
+        up = st.file_uploader("Or load a metadata file from elsewhere (UVPapp header .txt, or CSV)",
+                              type=["csv", "txt"],
+                              help="A UVPapp header (uvp6_header_*.txt), or a CSV with a filename (or deployment) "
+                                   "column and any of " + ", ".join(FIELDS))
+        if up is not None and st.session_state.get("upload_done") != up.file_id:
+            read_uploaded(up)
+            st.session_state["upload_done"] = up.file_id
+            st.rerun()
+    if "upload_error" in st.session_state:
+        st.error(st.session_state.pop("upload_error"))
     msg = st.session_state.pop("prefill_msg", None)
     if msg:
         text, conflicts, missing = msg
