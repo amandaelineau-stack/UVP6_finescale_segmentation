@@ -94,6 +94,9 @@ def on_project_change():
     project = Path(p) if p else None
     if not project or not project.is_dir() or not sources_in(project):
         st.session_state["meta_df"] = empty_meta()
+        st.session_state.pop("meta_edit", None)
+        if project and project.is_dir():          # e.g. a project just created, no data yet
+            st.session_state["cruise"] = core.read_cruise_info(project).get("cruise", "")
         return
     has = sources_in(project)
     if st.session_state.get("source") not in has:
@@ -483,6 +486,82 @@ st.session_state.setdefault("meta_df", empty_meta())
 
 # 1 ------------------------------------------------------------------------
 st.header("1 · Choose the UVP6 project")
+st.radio("UVP6 project", ["Use an existing UVP6 project", "Create a new UVP6 project"], key="project_mode",
+         horizontal=True, label_visibility="collapsed")
+if st.session_state["project_mode"] == "Create a new UVP6 project":
+    with st.container(border=True):
+        st.write("The project name is built from the fields below, as UVPapp expects it: "
+                 "`uvp6_sn<serial>_<date of the first sample>_<cruise>_<platform>`. Only the end is free.")
+        a1, a2, a3 = st.columns(3)
+        a1.text_input("UVP6 serial number", key="new_sn", placeholder="000328HF",
+                      help="As written on the instrument (HW_CONF), e.g. 000328HF")
+        a2.text_input("Cruise", key="new_cruise", placeholder="jc282_rebels2",
+                      help="Lowercase, spaces become _ (e.g. jc282_rebels2)")
+        a3.date_input("Date of the first sample", key="new_date", value=None, format="YYYY-MM-DD")
+        b1, b2, b3 = st.columns(3)
+        b1.selectbox("Platform", [*core.PLATFORMS, "other…"], key="new_platform")
+        if st.session_state["new_platform"] == "other…":
+            b2.text_input("Other platform", key="new_platform_other", placeholder="e.g. ship")
+        b3.text_input("Free addition at the end (optional)", key="new_extra", placeholder="e.g. upanddown",
+                      help="Added after the platform, e.g. _upanddown")
+        platform = (st.session_state.get("new_platform_other", "") if st.session_state["new_platform"] == "other…"
+                    else st.session_state["new_platform"])
+        name, name_problems = core.project_name(st.session_state.get("new_sn", ""), st.session_state.get("new_date"),
+                                                st.session_state.get("new_cruise", ""), platform,
+                                                st.session_state.get("new_extra", ""))
+        parent = folder_input("Create it in", "new_parent", "The folder that will hold the new project folder",
+                              status=(bool(st.session_state.get("new_parent")) and
+                                      Path(st.session_state["new_parent"]).is_dir(),
+                                      "not chosen yet" if not st.session_state.get("new_parent") else
+                                      ("found" if Path(st.session_state["new_parent"]).is_dir()
+                                       else "folder not found")))
+        new_path = (parent / name) if parent else None
+        st.markdown("**Project that will be created:**")
+        st.code(str(new_path) if new_path else name, language=None)
+        if parent and not parent.is_dir():
+            name_problems.append("The folder to create it in does not exist.")
+        if new_path and new_path.exists():
+            name_problems.append("A folder with this name already exists there.")
+        if new_path and len(str(new_path.resolve())) > 150:
+            name_problems.append("The path is long: Windows limits paths to 259 characters, choose a shorter "
+                                 "folder (e.g. X:\\UVP6).")
+        if not parent:
+            name_problems.append("Choose the folder to create it in.")
+        for p in name_problems:
+            st.caption(f":red[- {p}]")
+
+        def create_new_project():
+            try:
+                created = core.create_project(st.session_state["new_parent"], name, st.session_state["new_sn"],
+                                              st.session_state["new_date"], st.session_state["new_cruise"])
+            except OSError as err:
+                st.session_state["create_error"] = str(err)
+                return
+            st.session_state["created_project"] = str(created)
+            st.session_state["project"] = str(created)
+            st.session_state["project_mode"] = "Use an existing UVP6 project"
+            on_project_change()
+
+        st.button("Create the project", type="primary", disabled=bool(name_problems), width=BUTTON_WIDTH,
+                  on_click=create_new_project)
+        if "create_error" in st.session_state:
+            st.error(f"The project was not created: {st.session_state.pop('create_error')}", icon="🛑")
+
+if st.session_state.get("created_project"):
+    created = st.session_state["created_project"]
+    st.success(f"**UVP6 project created:** `{created}` with its sub-folders "
+               f"({', '.join(core.UVP_PROJECT_DIRS)}) and config/cruise_info.txt.", icon="✅")
+    st.markdown(
+        "**Next, in UVPapp** (open this project in it):\n"
+        "1. Import the **sequences** of the UVP6: they go into **raw/**, one sub-folder per sequence "
+        "(`yyyymmdd-HHMMSS`).\n"
+        "2. Add the **instrument configuration files** (HW_CONF, ACQ_CONF…): they go into **config/**.\n"
+        "3. Come back here and click **Check the project again** below: the deployments are then listed.")
+    st.button("Check the project again", on_click=on_project_change)
+    if st.button("Hide this message"):
+        st.session_state.pop("created_project")
+        st.rerun()
+
 st.write("Choose the UVP6 project folder (the one holding **raw**, **ecodata** and **meta**), then the data "
          "to work from. The deployments are listed in step 3: one deployment = one rosette dive = one RAW file.")
 project_path = Path(st.session_state["project"]) if st.session_state["project"] else None

@@ -39,7 +39,12 @@ app; close it to stop the app. (Tip: make a desktop shortcut to the .bat and giv
 
 The page has five steps:
 
-1. **Choose the UVP6 project**: the UVPapp project folder (`uvp6_sn…`, holding `raw/`, `ecodata/`, `meta/`), then
+1. **Choose the UVP6 project**, or **create a new one**: the app builds the name UVPapp expects,
+   `uvp6_sn<serial>_<date of the first sample>_<cruise>_<platform>[_<free addition>]`, from the serial number,
+   cruise, date and platform (only the end is free), creates the folder with its sub-folders (calibration,
+   config, CTDdata, doc, ecodata, livecamera, log, meta, raw, results) and `config/cruise_info.txt`, then tells
+   you to import the sequences (into `raw/`) and the instrument configuration files (into `config/`) with UVPapp.
+   For an existing project: the UVPapp project folder (`uvp6_sn…`, holding `raw/`, `ecodata/`, `meta/`), then
    work from **raw** (recommended) or **ecodata**; each choice shows what the project holds (e.g. "✅ 37 deployments",
    "⚠️ empty"). The title turns green once the project is found, with its number of deployments. One deployment = one rosette dive = one RAW file (`yyyymmdd-HHMMSS`).
 2. **Cruise metadata**, the same for every deployment: cruise ID, ship, sample type. The cruise ID is

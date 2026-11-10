@@ -401,6 +401,61 @@ def ecodata_ini(prof_dir):
     return None
 
 
+# --------------------------------------------------------------------------
+# New UVP6 project
+# --------------------------------------------------------------------------
+
+UVP_PROJECT_DIRS = ("calibration", "config", "CTDdata", "doc", "ecodata",
+                    "livecamera", "log", "meta", "raw", "results")
+PLATFORMS = ("ctd", "rcf", "float", "glider", "auv", "mooring")
+
+
+def clean_part(text, keep_case=False):
+    """A piece of a project name: spaces -> _, only letters, digits, _ and -."""
+    text = re.sub(r"\s+", "_", text.strip())
+    text = re.sub(r"[^A-Za-z0-9_-]", "", text)
+    return text if keep_case else text.lower()
+
+
+def project_name(sn, first_date, cruise, platform, extra=""):
+    """uvp6_sn<sn>_<yyyymmdd>_<cruise>_<platform>[_<extra>], e.g.
+    uvp6_sn000328hf_20250723_jc282_rebels2_ctd. Returns (name, problems)."""
+    problems = []
+    sn = clean_part(sn)
+    sn = sn[2:] if sn.startswith("sn") else sn
+    if not re.fullmatch(r"[0-9a-z]{6,10}", sn or ""):
+        problems.append("UVP6 serial number: e.g. 000328HF (as on the instrument).")
+    cruise = clean_part(cruise).strip("_")
+    if not cruise:
+        problems.append("Cruise name is empty.")
+    platform = clean_part(platform).strip("_")
+    if not platform:
+        problems.append("Platform is empty.")
+    if first_date is None:
+        problems.append("Date of the first sample is empty.")
+    extra = clean_part(extra, keep_case=True).strip("_")
+    date = first_date.strftime("%Y%m%d") if first_date else "yyyymmdd"
+    name = f"uvp6_sn{sn or 'xxxxxx'}_{date}_{cruise or 'cruise'}_{platform or 'platform'}"
+    return (name + f"_{extra}" if extra else name), problems
+
+
+def create_project(parent, name, sn, first_date, cruise):
+    """Create the UVPapp project folder with its sub-folders and a
+    config/cruise_info.txt (UVPapp format). Returns the project path."""
+    project = Path(parent) / name
+    if project.exists():
+        raise FileExistsError(f"{project} already exists")
+    for sub in UVP_PROJECT_DIRS:
+        (project / sub).mkdir(parents=True)
+    sn = clean_part(sn)
+    sn = sn[2:] if sn.startswith("sn") else sn
+    lines = ["[General]", f"acron={clean_part(cruise).strip('_')}", "cs_email=", "cs_name=", "description=",
+             "do_email=", "do_name=", "gen_info=", "op_email=", "op_name=", f"sn={sn}",
+             f"year={first_date.strftime('%Y%m%d')}", ""]
+    (project / "config" / "cruise_info.txt").write_text("\r\n".join(lines), encoding="latin-1", newline="")
+    return project
+
+
 def read_cruise_info(project_dir):
     """Cruise metadata from the project's config/cruise_info.txt, if any:
     {"cruise": ..., "ship": ...} (only the keys found). Reads the UVPapp
