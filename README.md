@@ -63,12 +63,13 @@ The page has five steps:
 | File | Where |
 |---|---|
 | Sample header for UVPapp, one line per segment | `<project>/meta/uvp6_header_<project name without "uvp6_">.txt` |
-| Previous sample header, if there was one | `<project>/meta/archives/<same name>.backup_<yyyymmdd_HHMMSS>` |
+| Previous sample header(s), if any | `<project>/meta/archives/<their name>_<YYYYMMDD-HHMM>.txt` |
 | All segments (first and last image, time, pressure) | `<project>/casts_segmented/all_segments.csv` (folder can be changed) |
 | One figure per deployment | `<project>/casts_segmented/figures/<deployment>_segments.png` |
 
 - **Header name**: UVPapp only reads the header named after the project folder, so the new header takes that name
-  and the old one is moved to `meta/archives/` first. The new header is written completely before the old one is
+  and every header already in `meta/` (whatever its name) is moved to `meta/archives/` first, with the
+  date-time added to its name. The new header is written completely before the old one is
   moved: if anything fails, nothing is replaced.
 - **Profile names** are made automatically: `<cruise ID>_<ctdref>_d01`, `_d02`… for downcasts and `_u01`… for
   upcasts, numbered in time order (e.g. `jc282_Rebels2_CTD001_d01`). Nothing is repeated if `ctdref` already

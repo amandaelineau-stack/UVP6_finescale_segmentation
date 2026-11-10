@@ -238,21 +238,26 @@ def positions(meta):
 
 
 def grouped_labels(pos, step=0.05):
-    """One label per place: deployments within ~`step` degrees share a label, e.g. 'CTD004, CTD005',
-    or 'CTD010 … CTD030 (14)' when there are many."""
-    groups = {}
+    """One label per cluster: deployments closer than ~`step` degrees (longitude scaled by
+    cos(latitude)) to one another share a label, e.g. 'CTD004, CTD005', or 'CTD010 … CTD030 (14)'.
+    The label is anchored at the top-right of its cluster."""
+    import math
+    k = max(0.1, math.cos(math.radians(float(pos["lat"].mean())))) if len(pos) else 1.0
+    pts = []
     for _, r in pos.iterrows():
-        key = (round(r["lat"] / step), round(r["lon"] / step))
-        g = groups.setdefault(key, {"lat": [], "lon": [], "refs": []})
         ref = r["label"].split("_", 1)[1] if "_" in r["label"] and not r["label"][:8].isdigit() else r["label"]
-        g["lat"].append(r["lat"])
-        g["lon"].append(r["lon"])
-        g["refs"].append(ref)
+        pts.append((r["lat"], r["lon"], ref))
+    clusters = []                      # single linkage: join every cluster the point is close to
+    for p in pts:
+        near = [c for c in clusters
+                if any(math.hypot(p[0] - q[0], (p[1] - q[1]) * k) < step for q in c)]
+        merged = [p] + [q for c in near for q in c]
+        clusters = [c for c in clusters if c not in near] + [merged]
     rows = []
-    for g in groups.values():
-        refs = sorted(g["refs"])
+    for c in clusters:
+        refs = sorted(q[2] for q in c)
         label = ", ".join(refs) if len(refs) <= 3 else f"{refs[0]} … {refs[-1]} ({len(refs)})"
-        rows.append({"lat": max(g["lat"]), "lon": sum(g["lon"]) / len(g["lon"]), "label": label})
+        rows.append({"lat": max(q[0] for q in c), "lon": max(q[1] for q in c), "label": label})
     return pd.DataFrame(rows, columns=["lat", "lon", "label"])
 
 
@@ -311,24 +316,62 @@ def camera_serial():
     return ""
 
 
-def save_station_png(pos, path):
-    """Static map of the stations (for the figures folder): lon/lat with labels."""
+GEBCO_WMS = ("https://wms.gebco.net/mapserv?service=WMS&version=1.1.1&request=GetMap&layers=GEBCO_LATEST"
+             "&styles=&srs=EPSG:4326&bbox={w},{s},{e},{n}&width={px}&height={py}&format=image/png")
+
+
+def gebco_image(w, s, e, n, px, py):
+    """GEBCO bathymetry image of a lon/lat box, or None without internet."""
+    import urllib.request
+    from matplotlib.image import imread
+    try:
+        with urllib.request.urlopen(GEBCO_WMS.format(w=w, s=s, e=e, n=n, px=px, py=py), timeout=20) as r:
+            return imread(io.BytesIO(r.read()), format="png")
+    except Exception:  # no network or service down: plain background instead
+        return None
+
+
+def save_station_png(pos, path, title=""):
+    """Static map of the stations (figures folder) on a GEBCO bathymetric background."""
     import math
+    from matplotlib import patheffects
     from matplotlib.figure import Figure
-    fig = Figure(figsize=(9, 7))
+    from matplotlib.ticker import FuncFormatter
+    lat0 = float(pos["lat"].mean())
+    k = max(0.1, math.cos(math.radians(lat0)))          # degrees of longitude are shorter
+    lat_span = max(pos["lat"].max() - pos["lat"].min(), 0.2)
+    lon_span = max(pos["lon"].max() - pos["lon"].min(), 0.2)
+    half = max(lat_span, lon_span * k) / 2 * 1.3 + 0.3   # square box with a margin, in degrees of latitude
+    clat, clon = (pos["lat"].max() + pos["lat"].min()) / 2, (pos["lon"].max() + pos["lon"].min()) / 2
+    s, n = max(-90.0, clat - half), min(90.0, clat + half)
+    w, e = clon - half / k, clon + half / k
+    w, e, s, n = (round(v, 4) for v in (w, e, s, n))
+
+    fig = Figure(figsize=(8, 8))
     ax = fig.add_subplot(111)
-    ax.scatter(pos["lon"], pos["lat"], s=30, color="#2a78d6", edgecolor="white", zorder=3)
-    span = max(pos["lat"].max() - pos["lat"].min(), pos["lon"].max() - pos["lon"].min(), 0.1)
-    for _, r in grouped_labels(pos, step=span / 25).iterrows():
-        ax.annotate(r["label"], (r["lon"], r["lat"]), xytext=(5, 4), textcoords="offset points", fontsize=7)
-    ax.set_aspect(1 / max(0.1, math.cos(math.radians(pos["lat"].mean()))), adjustable="datalim")
-    ax.margins(0.12)
-    ax.set_xlabel("longitude (°E)")
-    ax.set_ylabel("latitude (°N)")
-    ax.grid(alpha=0.3)
-    ax.set_title(f"Stations ({len(pos)} deployments)", loc="left")
+    img = gebco_image(w, s, e, n, 1200, int(1200 * (n - s) / ((e - w) * k)))
+    if img is not None:
+        ax.imshow(img, extent=(w, e, s, n), origin="upper", zorder=0, interpolation="bilinear")
+    else:
+        ax.set_facecolor("#dbe9f6")
+    halo = [patheffects.withStroke(linewidth=3, foreground="white")]
+    ax.scatter(pos["lon"], pos["lat"], s=42, color="#d62728", edgecolor="white", linewidth=1.2, zorder=5)
+    for _, r in grouped_labels(pos, step=half / 6).iterrows():
+        ax.annotate(r["label"], (r["lon"], r["lat"]), xytext=(9, 7), textcoords="offset points",
+                    fontsize=8, color="#1b2a3a", path_effects=halo, zorder=4)
+    ax.set_xlim(w, e)
+    ax.set_ylim(s, n)
+    ax.set_aspect(1 / k)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{abs(v):g}°{'W' if v < 0 else 'E'}"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{abs(v):g}°{'S' if v < 0 else 'N'}"))
+    ax.grid(color="white", alpha=0.35, linewidth=0.6)
+    ax.tick_params(labelsize=8)
+    ax.set_title(f"{title + ' · ' if title else ''}{len(pos)} deployments", loc="left", fontsize=11)
+    if img is not None:
+        ax.text(0.995, 0.005, "Bathymetry: GEBCO", transform=ax.transAxes, ha="right", va="bottom",
+                fontsize=7, color="#1b2a3a", path_effects=halo)
     fig.tight_layout()
-    fig.savefig(path, dpi=130)
+    fig.savefig(path, dpi=150)
 
 
 # ---------------------------------------------------------------- checks
@@ -336,6 +379,14 @@ def problems_of(meta, project_ok):
     out = []
     if not project_ok:
         out.append("Choose a UVP6 project folder with data in raw/ or ecodata/.")
+    else:
+        # Windows cannot write a path longer than 259 characters (the longest file written is
+        # the archived header in meta/archives/)
+        target = core.header_path(st.session_state["project"])
+        longest = len(str(Path(target).resolve().parent / "archives" / f"{target.stem}_YYYYMMDD-HHMM-9.txt"))
+        if longest > 259:
+            out.append(f"The project path is too long for Windows ({longest} > 259 characters for the "
+                       "archived header): move the project folder to a shorter path, e.g. X:\\UVP6.")
     for k, label in (("cruise", "Cruise ID"), ("ship", "Ship")):
         if not st.session_state.get(k, "").strip():
             out.append(f"Cruise metadata: {label} is empty.")
@@ -394,7 +445,8 @@ def run(project, source, out_dir, buffer_dbar, meta):
             core.save_png(d, out_dir / "figures" / f"{name}_segments.png")
         pos, _ = positions(meta[meta["include"] == True])  # noqa: E712
         if not pos.empty:
-            save_station_png(pos, out_dir / "figures" / "stations_map.png")
+            save_station_png(pos, out_dir / "figures" / "stations_map.png",
+                             title=str(st.session_state.get("cruise", "")).strip())
         s.update(label=f"2. Segments and {len(deployments)} figures saved in {out_dir}", state="complete")
 
     with st.status("3. Create the UVPapp sample header", expanded=False) as s:
@@ -404,7 +456,7 @@ def run(project, source, out_dir, buffer_dbar, meta):
         inc = meta[(meta["include"] == True) & meta["deployment"].isin(list(deployments))]  # noqa: E712
         metas = {r["deployment"]: {k: str(r[k] if pd.notna(r[k]) else "").strip() for k in FIELDS}
                  for _, r in inc.iterrows()}
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
         target = core.header_path(project)
         tmp = target.with_name(target.name + ".new")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -580,9 +632,11 @@ buffer_dbar = st.number_input("Bottom stop band (dbar)", min_value=0.5, value=5.
                                    "neither downcast nor upcast. Also skips deck tests shallower than this.")
 if ok_project:
     target = core.header_path(project)
-    if target.exists():
-        st.info(f"This project already has a sample header ({target.name}): it will be moved to "
-                f"meta/archives/ as {target.name}.backup_<date-time>, then the new one written.", icon="ℹ️")
+    old = core.headers_to_archive(project)
+    st.info(f"The new sample header will be written as **meta/{target.name}** (the name UVPapp reads)."
+            + (" First, the header(s) already in meta/ will be moved to meta/archives/ with the date-time "
+               "added: " + ", ".join(f"{h.stem}_YYYYMMDD-HHMM.txt" for h in old) if old else ""),
+            icon="ℹ️")
 problems = problems_of(meta, ok_project and st.session_state["source"] in sources_in(project))
 if problems:
     st.caption(":red[To do before running:]\n\n" + "\n".join(f":red[- {p}]" for p in problems[:15])
@@ -608,7 +662,8 @@ if res:
     st.download_button("Download the sample header for UVPapp", header.read_bytes(), file_name=header.name,
                        type="primary", width=BUTTON_WIDTH)
     st.caption(f"Saved in the UVP6 project: {header}"
-               + (f"  ·  previous header archived as {res['archived'].name}" if res["archived"] else ""))
+               + ("  ·  archived in meta/archives/: " + ", ".join(a.name for a in res["archived"])
+                  if res["archived"] else ""))
     segs = [s for n in res["used"] for s in res["deployments"][n]["segments"]]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Deployments in the header", len(res["used"]))

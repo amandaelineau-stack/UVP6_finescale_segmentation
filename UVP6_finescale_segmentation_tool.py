@@ -291,18 +291,35 @@ def find_uvpapp_header(project_dir):
     return hits[0] if hits else None
 
 
+def headers_to_archive(project_dir):
+    """Every UVPapp header already in meta/ (uvp6_header_*.txt): the one with the
+    project's name and any other one (e.g. from a project folder since renamed)."""
+    meta = Path(project_dir) / "meta"
+    return sorted(meta.glob("uvp6_header_*.txt")) if meta.is_dir() else []
+
+
+def archive_name(header, stamp):
+    """meta/archives/<header name>_<stamp>.txt, e.g. uvp6_header_x_20261110-1143.txt."""
+    return header.parent / "archives" / f"{header.stem}_{stamp}{header.suffix}"
+
+
 def install_header(new_file, project_dir, stamp):
-    """Put new_file in place as the project's UVPapp header. An existing
-    header is first moved to meta/archives/<name>.backup_<stamp>.
-    Returns (header path, archived path or None)."""
+    """Put new_file in place as the project's UVPapp header. Every header
+    already in meta/ is first moved to meta/archives/<name>_<stamp>.txt
+    (stamp = YYYYMMDD-HHMM; -2, -3... added if that name is taken).
+    Returns (header path, list of archived paths)."""
     target = header_path(project_dir)
     target.parent.mkdir(parents=True, exist_ok=True)
-    archived = None
-    if target.exists():
-        archives = target.parent / "archives"
-        archives.mkdir(exist_ok=True)
-        archived = archives / f"{target.name}.backup_{stamp}"
-        target.replace(archived)
+    archived = []
+    for old in headers_to_archive(project_dir):
+        dest = archive_name(old, stamp)
+        dest.parent.mkdir(exist_ok=True)
+        i = 2
+        while dest.exists():
+            dest = archive_name(old, f"{stamp}-{i}")
+            i += 1
+        old.replace(dest)
+        archived.append(dest)
     Path(new_file).replace(target)
     return target, archived
 
@@ -856,15 +873,16 @@ class App(tk.Tk):
             return
         project = Path(self.project.get())
         target = header_path(project)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
         first = next(iter(metas))
         n_prof = sum(len(self.deployments[n]["segments"]) for n in metas)
         example = profile_name(g["cruise"], metas[first]["ctdref"], "down", 1)
         question = (f"{n_prof} profiles, named like {example}.\n\n"
                     f"The header will be written as\n{target}\n(the name UVPapp reads).")
-        if target.exists():
-            question += (f"\n\nThe existing header will first be moved to\n"
-                         f"{target.parent / 'archives' / (target.name + '.backup_' + stamp)}")
+        old = headers_to_archive(project)
+        if old:
+            question += ("\n\nFirst moved to meta/archives/:\n"
+                         + "\n".join(archive_name(h, stamp).name for h in old))
         if not messagebox.askyesno("Create sample_header", question + "\n\nContinue?"):
             return
         # write next to the target first: the old header is only archived
@@ -879,7 +897,7 @@ class App(tk.Tk):
             return
         msg = f"{lines} profiles written:\n{target}"
         if archived:
-            msg += f"\n\nPrevious header archived as:\n{archived}"
+            msg += "\n\nPrevious header(s) archived as:\n" + "\n".join(str(a) for a in archived)
         self.log("\n" + msg)
         messagebox.showinfo("sample_header", msg)
 
