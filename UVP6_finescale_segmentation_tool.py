@@ -245,6 +245,9 @@ def parse_uvpapp_header(text):
     for name, rs in by_file.items():
         m = {}
         for k in DEPLOY_FIELDS:
+            if k == "constantdepth":
+                m[k] = "nan"            # always nan by default, never taken from an old header
+                continue
             if k == "ctdref":
                 # profile id minus its _d01 / _yo01_u02 suffix, and minus the
                 # cruise ID if it starts with it (names made by this app)
@@ -419,7 +422,8 @@ def list_deployments(project_dir, source):
         name = ini.get("filename") or prof_dir.name
         if name not in metas:
             names.append(name)
-            m = {k: ini.get(k, "") for k in DEPLOY_FIELDS if k != "ctdref"}
+            m = {k: ini.get(k, "") for k in DEPLOY_FIELDS if k not in ("ctdref", "constantdepth")}
+            m["constantdepth"] = "nan"
             m["ctdref"] = re.sub(r"(_yo\d+)?_[du]\d+$", "", ini.get("profileid", ""))
             metas[name] = m
         for k, v in (("exp", "Exp"), ("pixelsize", "Pixel_Size"), ("volimage", "Image_volume")):

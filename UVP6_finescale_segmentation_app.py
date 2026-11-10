@@ -112,7 +112,8 @@ def load_deployments():
         if source == "raw":
             size = (project / "raw" / n / f"{n}_data.txt").stat().st_size
             note = "very short file: deck test?" if size < SHORT_FILE else ""
-        rows.append({"include": note == "", "deployment": n, **{k: m.get(k, "") for k in FIELDS},
+        rows.append({"include": note == "", "deployment": n,
+                     **{k: m.get(k, "nan" if k == "constantdepth" else "") for k in FIELDS},
                      "note": note})
     st.session_state.pop("meta_edit", None)
     st.session_state["meta_df"] = pd.DataFrame(rows, columns=["include", "deployment", *FIELDS, "note"])
@@ -195,7 +196,8 @@ def read_uploaded(up):
 
 
 # ---------------------------------------------------------------- station map
-CONSTANTDEPTH_HELP = "UVPapp header field, copied as given (e.g. 5, or nan)."
+CONSTANTDEPTH_HELP = ("UVPapp header field 'constantdepth'. nan by default (not taken from an old header); "
+                      "change it here only if needed.")
 
 
 def positions(meta):
