@@ -659,11 +659,17 @@ res = st.session_state.get("result")
 if res:
     st.header("5 · Results: sample header, segments and figures")
     header = res["header"]
-    st.download_button("Download the sample header for UVPapp", header.read_bytes(), file_name=header.name,
-                       type="primary", width=BUTTON_WIDTH)
-    st.caption(f"Saved in the UVP6 project: {header}"
-               + ("  ·  archived in meta/archives/: " + ", ".join(a.name for a in res["archived"])
-                  if res["archived"] else ""))
+    if header.exists():
+        st.success(f"**Sample header created** ({res['profiles']} profiles), in the UVP6 project, "
+                   "under the name UVPapp reads:", icon="✅")
+        st.code(str(header), language=None)
+        if res["archived"]:
+            st.markdown("Previous header(s) moved to **meta/archives/**:")
+            st.code("\n".join(str(a) for a in res["archived"]), language=None)
+    else:
+        st.error(f"The sample header is not where it was written: {header}", icon="🛑")
+    st.download_button("Download the sample header for UVPapp", header.read_bytes() if header.exists() else b"",
+                       file_name=header.name, type="primary", width=BUTTON_WIDTH, disabled=not header.exists())
     segs = [s for n in res["used"] for s in res["deployments"][n]["segments"]]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Deployments in the header", len(res["used"]))
